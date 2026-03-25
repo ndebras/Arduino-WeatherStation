@@ -6,12 +6,15 @@ This repository contains a complete implementation of a connected weather statio
 
 The project is designed for autonomous operation, with support for battery-powered deployments, automatic USB-based debug detection, and minimal power consumption.
 
+![Weather Station](Images/Rendered.png) ![Weather Station](Images/Rendered_cut.png)
+
 ## Features
 
 - **Environmental Monitoring**: Real-time temperature and humidity acquisition via DHT20 (AHT20) sensor
 - **Local Display**: Structured multi-line information display on 128x64 SH1106 OLED screen
 - **Network Connectivity**: Wi-Fi integration for seamless network access
 - **Time Synchronization**: Automatic clock synchronization using NTP (be.pool.ntp.org)
+- **Local Preference Storage**: Key/value preference helpers stored in FFat flash storage
 - **Smart Debug System**: Conditional logging that automatically detects USB connection
 - **Production Ready**: Modular architecture with clean separation of concerns
 - **Low Power**: Designed for battery-powered deployment with minimal overhead
@@ -103,16 +106,16 @@ const int DAYLIGHT_OFFSET_SEC = 3600; // Daylight saving adjustment
 2. **I2C Bus Setup**: Initializes SDA/SCL communication lines
 3. **DHT20 Detection**: Verifies sensor presence and functionality
 4. **Display Initialization**: Validates OLED display and configures rotation
-5. **Wi-Fi Connection**: Connects to specified network
+5. **Wi-Fi Connection**: Connects to the specified network and waits until association succeeds
 6. **Time Synchronization**: Retrieves current time via NTP
 
 ### Runtime Display
 
 The OLED screen shows a formatted layout with:
-- **Header**: "Weather Station"
+- **Header**: Current time (`HH:MM:SS` when NTP is available)
 - **Temperature**: Current temperature in °C
 - **Humidity**: Current relative humidity in %
-- **Footer**: Current time and date (HH:MM:SS | DD/MM/YYYY)
+- **Footer**: Current Wi-Fi IP address
 
 Updates occur automatically every 1 second.
 
@@ -121,9 +124,8 @@ Updates occur automatically every 1 second.
 When USB is connected, the system enables serial debug output at 115200 baud, displaying:
 - Sensor initialization status
 - Wi-Fi connection progress
-- Temperature and humidity readings
 - Time synchronization status
-- System diagnostics
+- Optional preference file diagnostics when the helper functions are used
 
 When running disconnected (battery mode), debug output is automatically disabled to reduce power consumption.
 
@@ -138,6 +140,7 @@ When running disconnected (battery mode), debug output is automatically disabled
 | `display4Lines()` | Structured 4-line display renderer |
 | `showMessage()` | Simple message display utility |
 | `getTimeString()` | Formats current time as readable string |
+| `readPreference()` / `writePreference()` | Read and update key/value settings in FFat |
 | `initDebug()` | Smart debug initialization |
 
 ### Key Design Decisions
@@ -146,7 +149,7 @@ When running disconnected (battery mode), debug output is automatically disabled
 - **Modular Functions**: Each display format and operation is encapsulated in dedicated functions
 - **Dynamic Debug**: Debug macros (`debugPrint`, `debugPrintln`) reduce overhead when disabled
 - **NTP Time Sync**: Automatic synchronization eliminates need for real-time clock module
-- **Non-blocking Waits**: Microcontroller remains responsive during initialization
+- **Simple Blocking Startup**: The current implementation waits for Wi-Fi and initial time synchronization during startup for deterministic boot behavior
 
 ## Technical Specifications
 
@@ -202,7 +205,7 @@ For battery-powered deployments:
 |-------|---------|----------|
 | DHT20 Not Detected | Error message on startup | Verify I2C wiring; check address (0x38) with I2C scanner |
 | Display Not Visible | Screen remains blank | Ensure I2C address (0x3C) is correct; verify power supply |
-| Wi-Fi Connection Fails | Endless connection attempts | Verify SSID and password; check signal strength |
+| Wi-Fi Connection Fails | Startup blocks on connection attempt | Verify SSID and password; check signal strength |
 | Time Not Synced | "Time not available" message | Verify NTP server accessibility; check internet connection |
 | No Serial Output | Missing debug messages | Ensure USB is properly connected; check baud rate (115200) |
 
@@ -215,13 +218,44 @@ To enable forced debug output (even without USB):
 debugEnabled = true;  // Force enable debug output
 ```
 
+## Changelog
+
+### 2026-03-25
+
+#### Added
+
+- Added a formal project changelog to track functional and documentation changes over time.
+- Added README documentation for local FFat-based preference storage helpers already present in the sketch.
+
+#### Changed
+
+- Expanded the feature list to mention persistent key/value preference storage.
+- Expanded the architecture overview to include preference management helper functions.
+- Aligned the README with the current sketch state so documented functionality matches the code currently in the repository.
+
+#### Documentation
+
+- Consolidated project information into a clearer structure covering setup, operation, architecture, power considerations, and troubleshooting.
+- Kept the project status and update date current for the latest repository revision.
+
+### 2026-03-25 README Review
+
+#### Changed
+
+- Corrected the startup description to reflect the current blocking Wi-Fi and NTP initialization behavior in the sketch.
+- Corrected the OLED runtime display description so it matches the actual screen layout: time in the header, sensor values in the middle, and IP address in the footer.
+- Adjusted the debug output section to remove claims about periodic sensor logs that are currently commented out in the sketch.
+
+#### Fixed
+
+- Fixed architecture documentation that previously described initialization as non-blocking although the current implementation is blocking.
+- Fixed the Wi-Fi troubleshooting entry so it matches the actual runtime symptom observed with the current code.
+
 ## Future Enhancements
 
 Potential improvements for future versions:
 
-- **Data Logging**: SD card integration for historical data storage
 - **Cloud Upload**: MQTT or REST API for remote data transmission
-- **External Alerts**: Buzzer or visual alerts for threshold violations
 - **Web Interface**: Simple web server for local network access
 - **Multiple Sensors**: Support for multiple sensor nodes with aggregation
 - **Calibration**: User-adjustable sensor offset calibration

@@ -571,6 +571,7 @@ void loop() {
   );
 
   /* Debug output (only if enabled) */
+  /*
   debugPrint("Temperature: ");
   debugPrint(temp.temperature);
   debugPrintln(" °C");
@@ -580,6 +581,7 @@ void loop() {
   debugPrintln(" %");
 
   debugPrintln("------------------------");
-
+  */
+ 
   delay(1000);                            // Wait 1 second before next update
 }
