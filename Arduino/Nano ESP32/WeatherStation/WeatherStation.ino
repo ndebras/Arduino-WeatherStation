@@ -48,7 +48,9 @@ Author: Nicolas Debras <nicolas@debras.fr>
 #include <Adafruit_SH110X.h>      // Driver for SH1106 OLED displays
 #include <WiFi.h>                 // ESP32 Wi-Fi connectivity library
 #include <time.h>                 // Time functions (NTP synchronization, struct tm, etc.)
-#include <LittleFS.h>              // File system library 
+//#include <FS.h>                   // File system base classes used by FFat
+#include <FFat.h>                 // FAT file system library for ESP32 ffat partition
+//#include <esp_partition.h>        // ESP32 partition table access
 
 Adafruit_AHTX0 aht;               // Create an instance of the AHT20/DHT20 sensor
 bool debugEnabled = false;        // Flag used to enable/disable Serial debug output dynamically
@@ -74,6 +76,9 @@ const char* NTP_SERVER = "be.pool.ntp.org";
 const long GMT_OFFSET_SEC = 0;
 const int DAYLIGHT_OFFSET_SEC = 3600;
 
+//Preference file path (stored in FFat)
+const char* PREFERENCE_FILE = "/preferences.txt";
+
 // Debug macros
 // These macros wrap Serial.print/println and only execute if debugEnabled is true
 // This avoids unnecessary overhead when debugging is disabled
@@ -82,6 +87,273 @@ const int DAYLIGHT_OFFSET_SEC = 3600;
 
 #define debugPrintln(x) \
   if (debugEnabled) Serial.println(x)
+
+/*
+Read a value from a preference file stored in FFat.
+The file format is a simple text file with one "key=value" pair per line.
+Blank lines and lines starting with '#' are ignored.
+Returns the matching value, or defaultValue if the file or key is not found.
+*/
+String readPreference(const char* filePath,
+                      const char* key,
+                      const char* defaultValue = "") {
+  File file = FFat.open(filePath, "r");
+  if (!file) {
+    debugPrint("Unable to open preference file for reading: ");
+    debugPrintln(filePath);
+    return String(defaultValue);
+  }
+
+  String targetKey = String(key);
+
+  while (file.available()) {
+    String line = file.readStringUntil('\n');
+    line.trim();
+
+    if (line.length() == 0 || line.startsWith("#")) {
+      continue;
+    }
+
+    int separatorIndex = line.indexOf('=');
+    if (separatorIndex < 0) {
+      continue;
+    }
+
+    String currentKey = line.substring(0, separatorIndex);
+    String currentValue = line.substring(separatorIndex + 1);
+    currentKey.trim();
+    currentValue.trim();
+
+    if (currentKey == targetKey) {
+      file.close();
+      return currentValue;
+    }
+  }
+
+  file.close();
+  return String(defaultValue);
+}
+
+/*
+Read and return the full content of a preference file stored in FFat.
+Returns defaultValue if the file cannot be opened.
+*/
+String readAllPreferences(const char* filePath,
+                          const char* defaultValue = "") {
+  File file = FFat.open(filePath, "r");
+  if (!file) {
+    debugPrint("Unable to open preference file for full read: ");
+    debugPrintln(filePath);
+    return String(defaultValue);
+  }
+
+  String content;
+
+  while (file.available()) {
+    String line = file.readStringUntil('\n');
+    line.trim();
+    content += line;
+
+    if (file.available()) {
+      content += "\n";
+    }
+  }
+
+  file.close();
+  return content;
+}
+
+/*
+Write or update a key/value pair in a preference file stored in FFat.
+The file format is a simple text file with one "key=value" pair per line.
+Existing keys are replaced and missing keys are appended at the end.
+Returns true on success, false otherwise.
+*/
+bool writePreference(const char* filePath,
+                     const char* key,
+                     const char* value) {
+  String targetKey = String(key);
+  String updatedContent;
+  bool keyUpdated = false;
+
+  File inputFile = FFat.open(filePath, "r");
+  if (inputFile) {
+    while (inputFile.available()) {
+      String line = inputFile.readStringUntil('\n');
+      line.trim();
+
+      if (line.length() == 0) {
+        continue;
+      }
+
+      if (line.startsWith("#")) {
+        updatedContent += line + "\n";
+        continue;
+      }
+
+      int separatorIndex = line.indexOf('=');
+      if (separatorIndex < 0) {
+        updatedContent += line + "\n";
+        continue;
+      }
+
+      String currentKey = line.substring(0, separatorIndex);
+      currentKey.trim();
+
+      if (currentKey == targetKey) {
+        updatedContent += targetKey + "=" + String(value) + "\n";
+        keyUpdated = true;
+      } else {
+        updatedContent += line + "\n";
+      }
+    }
+
+    inputFile.close();
+  }
+
+  if (!keyUpdated) {
+    updatedContent += targetKey + "=" + String(value) + "\n";
+  }
+
+  File outputFile = FFat.open(filePath, "w");
+  if (!outputFile) {
+    debugPrint("Unable to open preference file for writing: ");
+    debugPrintln(filePath);
+    return false;
+  }
+
+  size_t written = outputFile.print(updatedContent);
+  outputFile.close();
+
+  return written == updatedContent.length();
+}
+
+/*
+Delete a key/value pair from a preference file stored in FFat.
+The file format is a simple text file with one "key=value" pair per line.
+Returns true when the key is removed, false if the key or file does not exist
+or if rewriting the file fails.
+*/
+bool deletePreference(const char* filePath, const char* key) {
+  File inputFile = FFat.open(filePath, "r");
+  if (!inputFile) {
+    debugPrint("Unable to open preference file for deletion: ");
+    debugPrintln(filePath);
+    return false;
+  }
+
+  String targetKey = String(key);
+  String updatedContent;
+  bool keyDeleted = false;
+
+  while (inputFile.available()) {
+    String line = inputFile.readStringUntil('\n');
+    line.trim();
+
+    if (line.length() == 0) {
+      continue;
+    }
+
+    if (line.startsWith("#")) {
+      updatedContent += line + "\n";
+      continue;
+    }
+
+    int separatorIndex = line.indexOf('=');
+    if (separatorIndex < 0) {
+      updatedContent += line + "\n";
+      continue;
+    }
+
+    String currentKey = line.substring(0, separatorIndex);
+    currentKey.trim();
+
+    if (currentKey == targetKey) {
+      keyDeleted = true;
+      continue;
+    }
+
+    updatedContent += line + "\n";
+  }
+
+  inputFile.close();
+
+  if (!keyDeleted) {
+    return false;
+  }
+
+  File outputFile = FFat.open(filePath, "w");
+  if (!outputFile) {
+    debugPrint("Unable to rewrite preference file after deletion: ");
+    debugPrintln(filePath);
+    return false;
+  }
+
+  size_t written = outputFile.print(updatedContent);
+  outputFile.close();
+
+  return written == updatedContent.length();
+}
+
+/*
+Print the ESP32 partition table to Serial for debugging.
+Lists each partition's label, type, subtype, flash address and size.
+Only outputs when debug is enabled.
+*/
+/*
+void debugPartitions() {
+  debugPrintln("=== Partition Table ===");
+
+  esp_partition_iterator_t it =
+    esp_partition_find(ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, NULL);
+
+  while (it != NULL) {
+    const esp_partition_t* p = esp_partition_get(it);
+
+    char info[80];
+    snprintf(info, sizeof(info),
+             "%-16s | type %02X | sub %02X | addr 0x%06X | size %6u KB",
+             p->label,
+             (unsigned)p->type,
+             (unsigned)p->subtype,
+             (unsigned)p->address,
+             (unsigned)(p->size / 1024));
+    debugPrintln(info);
+
+    it = esp_partition_next(it);
+  }
+
+  esp_partition_iterator_release(it);
+  debugPrintln("======================");
+}
+*/
+
+/*
+Dump the raw contents of a preference file to Serial through the debug macros.
+Returns true when the file could be opened and printed, false otherwise.
+*/
+bool debugPreference(const char* filePath) {
+  File file = FFat.open(filePath, "r");
+  if (!file) {
+    debugPrint("Unable to open preference file for debug: ");
+    debugPrintln(filePath);
+    return false;
+  }
+
+  debugPrint("Preference file dump: ");
+  debugPrintln(filePath);
+  debugPrintln("------------------------");
+
+  while (file.available()) {
+    String line = file.readStringUntil('\n');
+    line.trim();
+    debugPrintln(line);
+  }
+
+  debugPrintln("------------------------");
+  file.close();
+  return true;
+}
 
 /*
 Initialize the debug environment.
@@ -164,12 +436,43 @@ void display4Lines(const char* line1,
   display.display();                       // Update display
 }
 
+
+/*
+Retrieve current local time as a formatted string.
+Parameters:
+  - format: strftime format string (default: "%H:%M:%S - %d/%m/%Y")
+Returns:
+  - Formatted time string, or "Time not available" if time not synced
+*/
+String getTimeString(const char* format = "%H:%M:%S - %d/%m/%Y") {
+  struct tm timeinfo;
+
+  // If time is not available, return an error string
+  if (!getLocalTime(&timeinfo)) {
+    return "Time not available";
+  }
+
+  char buffer[50];  // Buffer to store formatted time string (increased size for flexibility)
+
+  // Format time into buffer using provided format string
+  strftime(buffer, sizeof(buffer), format, &timeinfo);
+
+  return String(buffer);  // Convert C string to Arduino String
+}
+
 /*
 Setup function (runs once at boot).
 Initializes debug, I2C, sensor, display, Wi-Fi and time synchronization.
 */
 void setup() {
   initDebug();                             // Initialize debug system
+  
+  if (!FFat.begin(true)) {                 // Mount and format FFat if needed
+    debugPrintln("FFat initialization failed");
+    while (true) {
+      delay(100);
+    }
+  }
 
   Wire.begin(I2C_SDA, I2C_SCL);            // Initialize I2C bus with custom pins
 
@@ -232,34 +535,14 @@ void setup() {
   debugPrintln("Time synchronized");
 }
 
-/*
-Retrieve current local time as a formatted string.
-Parameters:
-  - format: strftime format string (default: "%H:%M:%S - %d/%m/%Y")
-Returns:
-  - Formatted time string, or "Time not available" if time not synced
-*/
-String getTimeString(const char* format = "%H:%M:%S - %d/%m/%Y") {
-  struct tm timeinfo;
-
-  // If time is not available, return an error string
-  if (!getLocalTime(&timeinfo)) {
-    return "Time not available";
-  }
-
-  char buffer[50];  // Buffer to store formatted time string (increased size for flexibility)
-
-  // Format time into buffer using provided format string
-  strftime(buffer, sizeof(buffer), format, &timeinfo);
-
-  return String(buffer);  // Convert C string to Arduino String
-}
 
 /*
 Main loop function (runs continuously).
 Reads sensor data, updates display, and prints debug information.
 */
 void loop() {
+  static bool preferenceTestDone = false;
+
   sensors_event_t humidity, temp;          // Structures to store sensor data
   aht.getEvent(&humidity, &temp);          // Read temperature and humidity
 
