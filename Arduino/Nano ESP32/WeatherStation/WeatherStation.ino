@@ -48,6 +48,7 @@ Author: Nicolas Debras <nicolas@debras.fr>
 #include <Adafruit_SH110X.h>      // Driver for SH1106 OLED displays
 #include <WiFi.h>                 // ESP32 Wi-Fi connectivity library
 #include <time.h>                 // Time functions (NTP synchronization, struct tm, etc.)
+#include <LittleFS.h>              // File system library 
 
 Adafruit_AHTX0 aht;               // Create an instance of the AHT20/DHT20 sensor
 bool debugEnabled = false;        // Flag used to enable/disable Serial debug output dynamically
@@ -272,18 +273,18 @@ void loop() {
   snprintf(line1, sizeof(line1), "T : %.1f C", temp.temperature);
   snprintf(line2, sizeof(line2), "H : %.1f %%", humidity.relative_humidity);
 
-  String currentTime = getTimeString("%H:%M");    // Retrieve current time (uses default format)
+  String currentTime = getTimeString("%H:%M:%S");    // Retrieve current time (uses default format)
                                                   // Or use custom format: getTimeString("%H:%M:%S")
 
   // Concatenate time with IP address
-  String timeAndIP = currentTime + " - " + WiFi.localIP().toString();
+  String ipAddress = WiFi.localIP().toString();
 
   // Display all information on screen
   display4Lines(
-    "Weather Station",                     // Header
+    currentTime.c_str(),                     // Header
     line1,                                // Temperature
     line2,                                // Humidity
-    timeAndIP.c_str()                     // Time and IP address (converted to C string)
+    ipAddress.c_str()                     // Time and IP address (converted to C string)
   );
 
   /* Debug output (only if enabled) */
