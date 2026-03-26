@@ -47,13 +47,11 @@ Author: Nicolas Debras <nicolas@debras.fr>
 #include <Adafruit_AHTX0.h>       // Library for AHT20/DHT20 temperature and humidity sensor
 #include <Adafruit_GFX.h>         // Core graphics library (text, shapes, etc.)
 #include <Adafruit_SH110X.h>      // Driver for SH1106 OLED displays
-#include <WiFi.h>                 // ESP32 Wi-Fi connectivity library
 #include <time.h>                 // Time functions (NTP synchronization, struct tm, etc.)
-//#include <FS.h>                   // File system base classes used by FFat
 #include <FFat.h>                 // FAT file system library for ESP32 ffat partition
-//#include <esp_partition.h>        // ESP32 partition table access
 #include "FFatPreferences.h"      // Reusable FFat-backed key/value helpers
 #include "WeatherDisplay.h"       // Reusable SH1106 display rendering helpers
+#include "WeatherWifi.h"          // Reusable Wi-Fi and NTP helpers
 
 Adafruit_AHTX0 aht;               // Create an instance of the AHT20/DHT20 sensor
 bool debugEnabled = false;        // Flag used to enable/disable Serial debug output dynamically
@@ -91,38 +89,6 @@ const char* PREFERENCE_FILE = "/preferences.txt";
 #define debugPrintln(x) \
   if (debugEnabled) Serial.println(x)
 
-/*
-Print the ESP32 partition table to Serial for debugging.
-Lists each partition's label, type, subtype, flash address and size.
-Only outputs when debug is enabled.
-*/
-/*
-void debugPartitions() {
-  debugPrintln("=== Partition Table ===");
-
-  esp_partition_iterator_t it =
-    esp_partition_find(ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, NULL);
-
-  while (it != NULL) {
-    const esp_partition_t* p = esp_partition_get(it);
-
-    char info[80];
-    snprintf(info, sizeof(info),
-             "%-16s | type %02X | sub %02X | addr 0x%06X | size %6u KB",
-             p->label,
-             (unsigned)p->type,
-             (unsigned)p->subtype,
-             (unsigned)p->address,
-             (unsigned)(p->size / 1024));
-    debugPrintln(info);
-
-    it = esp_partition_next(it);
-  }
-
-  esp_partition_iterator_release(it);
-  debugPrintln("======================");
-}
-*/
 
 /*
 Initialize the debug environment.
@@ -176,6 +142,7 @@ Initializes debug, I2C, sensor, display, Wi-Fi and time synchronization.
 void setup() {
   initDebug();                             // Initialize debug system
   setPreferenceDebugStream(debugEnabled ? &Serial : nullptr);
+  setNetworkDebugStream(debugEnabled ? &Serial : nullptr);
   
   if (!FFat.begin(true)) {                 // Mount and format FFat if needed
     debugPrintln("FFat initialization failed");
@@ -214,35 +181,20 @@ void setup() {
   delay(1000);
 
   showMessage(display, "Connecting to Wi-Fi..."); // Inform user about Wi-Fi connection
-  
-  debugPrintln("Connecting to Wi-Fi...");
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);    // Start Wi-Fi connection
 
-  // Wait until connection is established
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    debugPrint(".");                       // Print progress indicator
+  if (!connectToWifi(WIFI_SSID, WIFI_PASSWORD)) {
+    showMessage(display, "Wi-Fi failed", "Restart device");
+    while (true) {
+      delay(100);
+    }
   }
 
-  debugPrintln();
-  debugPrintln("Wi-Fi connected");
-  debugPrint("IP address: ");
-  debugPrintln(WiFi.localIP());            // Display assigned IP address
-
-  // Configure system time using NTP server
-  configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
-
-  debugPrintln("Waiting for NTP time sync...");
-
-  // Wait until time is successfully retrieved
-  struct tm timeinfo;
-  while (!getLocalTime(&timeinfo)) {
-    debugPrint(".");
-    delay(500);
+  if (!syncTimeWithNtp(NTP_SERVER, GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC)) {
+    showMessage(display, "NTP sync failed", "Restart device");
+    while (true) {
+      delay(100);
+    }
   }
-
-  debugPrintln();
-  debugPrintln("Time synchronized");
 }
 
 
@@ -268,7 +220,7 @@ void loop() {
                                                   // Or use custom format: getTimeString("%H:%M:%S")
 
   // Concatenate time with IP address
-  String ipAddress = WiFi.localIP().toString();
+  String ipAddress = getWifiIpAddress();
 
   // Display all information on screen
   display4Lines(
