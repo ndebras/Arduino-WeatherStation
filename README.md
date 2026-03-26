@@ -15,6 +15,8 @@ The project is designed for autonomous operation, with support for battery-power
 - **Network Connectivity**: Wi-Fi integration for seamless network access
 - **Time Synchronization**: Automatic clock synchronization using NTP (be.pool.ntp.org)
 - **Local Preference Storage**: Key/value preference helpers stored in FFat flash storage
+- **Reusable Preference Module**: FFat preference helpers extracted into shared source files for reuse across sketches
+- **Reusable Display Module**: SH1106 display rendering helpers extracted into shared source files for reuse across sketches
 - **Smart Debug System**: Conditional logging that automatically detects USB connection
 - **Production Ready**: Modular architecture with clean separation of concerns
 - **Low Power**: Designed for battery-powered deployment with minimal overhead
@@ -137,10 +139,9 @@ When running disconnected (battery mode), debug output is automatically disabled
 |----------|---------|
 | `setup()` | One-time initialization of hardware and network |
 | `loop()` | Main execution cycle: sensor read → display update |
-| `display4Lines()` | Structured 4-line display renderer |
-| `showMessage()` | Simple message display utility |
+| `WeatherDisplay.h/.cpp` | Shared SH1106 rendering helpers for status and dashboard screens |
 | `getTimeString()` | Formats current time as readable string |
-| `readPreference()` / `writePreference()` | Read and update key/value settings in FFat |
+| `FFatPreferences.h/.cpp` | Shared FFat-backed helpers for reading and updating key/value settings |
 | `initDebug()` | Smart debug initialization |
 
 ### Key Design Decisions
@@ -268,6 +269,10 @@ Arduino WeatherStation/
 ├── Arduino/
 │   └── Nano ESP32/
 │       └── WeatherStation/
+│           ├── FFatPreferences.cpp     # Shared FFat preference helper implementation
+│           ├── FFatPreferences.h       # Shared FFat preference helper declarations
+│           ├── WeatherDisplay.cpp      # Shared SH1106 display helper implementation
+│           ├── WeatherDisplay.h        # Shared SH1106 display helper declarations
 │           └── WeatherStation.ino      # Main sketch
 ├── Fusion 360/
 │   └── WeatherStation.f3z              # 3D enclosure design

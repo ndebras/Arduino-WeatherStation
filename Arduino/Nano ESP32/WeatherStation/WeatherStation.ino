@@ -40,6 +40,7 @@ Notes:
 
 Author: Nicolas Debras <nicolas@debras.fr>
 ===============================================================================
+
 */
 
 #include <Wire.h>                 // I2C communication library (used to communicate with sensors and display)
@@ -51,6 +52,8 @@ Author: Nicolas Debras <nicolas@debras.fr>
 //#include <FS.h>                   // File system base classes used by FFat
 #include <FFat.h>                 // FAT file system library for ESP32 ffat partition
 //#include <esp_partition.h>        // ESP32 partition table access
+#include "FFatPreferences.h"      // Reusable FFat-backed key/value helpers
+#include "WeatherDisplay.h"       // Reusable SH1106 display rendering helpers
 
 Adafruit_AHTX0 aht;               // Create an instance of the AHT20/DHT20 sensor
 bool debugEnabled = false;        // Flag used to enable/disable Serial debug output dynamically
@@ -89,213 +92,6 @@ const char* PREFERENCE_FILE = "/preferences.txt";
   if (debugEnabled) Serial.println(x)
 
 /*
-Read a value from a preference file stored in FFat.
-The file format is a simple text file with one "key=value" pair per line.
-Blank lines and lines starting with '#' are ignored.
-Returns the matching value, or defaultValue if the file or key is not found.
-*/
-String readPreference(const char* filePath,
-                      const char* key,
-                      const char* defaultValue = "") {
-  File file = FFat.open(filePath, "r");
-  if (!file) {
-    debugPrint("Unable to open preference file for reading: ");
-    debugPrintln(filePath);
-    return String(defaultValue);
-  }
-
-  String targetKey = String(key);
-
-  while (file.available()) {
-    String line = file.readStringUntil('\n');
-    line.trim();
-
-    if (line.length() == 0 || line.startsWith("#")) {
-      continue;
-    }
-
-    int separatorIndex = line.indexOf('=');
-    if (separatorIndex < 0) {
-      continue;
-    }
-
-    String currentKey = line.substring(0, separatorIndex);
-    String currentValue = line.substring(separatorIndex + 1);
-    currentKey.trim();
-    currentValue.trim();
-
-    if (currentKey == targetKey) {
-      file.close();
-      return currentValue;
-    }
-  }
-
-  file.close();
-  return String(defaultValue);
-}
-
-/*
-Read and return the full content of a preference file stored in FFat.
-Returns defaultValue if the file cannot be opened.
-*/
-String readAllPreferences(const char* filePath,
-                          const char* defaultValue = "") {
-  File file = FFat.open(filePath, "r");
-  if (!file) {
-    debugPrint("Unable to open preference file for full read: ");
-    debugPrintln(filePath);
-    return String(defaultValue);
-  }
-
-  String content;
-
-  while (file.available()) {
-    String line = file.readStringUntil('\n');
-    line.trim();
-    content += line;
-
-    if (file.available()) {
-      content += "\n";
-    }
-  }
-
-  file.close();
-  return content;
-}
-
-/*
-Write or update a key/value pair in a preference file stored in FFat.
-The file format is a simple text file with one "key=value" pair per line.
-Existing keys are replaced and missing keys are appended at the end.
-Returns true on success, false otherwise.
-*/
-bool writePreference(const char* filePath,
-                     const char* key,
-                     const char* value) {
-  String targetKey = String(key);
-  String updatedContent;
-  bool keyUpdated = false;
-
-  File inputFile = FFat.open(filePath, "r");
-  if (inputFile) {
-    while (inputFile.available()) {
-      String line = inputFile.readStringUntil('\n');
-      line.trim();
-
-      if (line.length() == 0) {
-        continue;
-      }
-
-      if (line.startsWith("#")) {
-        updatedContent += line + "\n";
-        continue;
-      }
-
-      int separatorIndex = line.indexOf('=');
-      if (separatorIndex < 0) {
-        updatedContent += line + "\n";
-        continue;
-      }
-
-      String currentKey = line.substring(0, separatorIndex);
-      currentKey.trim();
-
-      if (currentKey == targetKey) {
-        updatedContent += targetKey + "=" + String(value) + "\n";
-        keyUpdated = true;
-      } else {
-        updatedContent += line + "\n";
-      }
-    }
-
-    inputFile.close();
-  }
-
-  if (!keyUpdated) {
-    updatedContent += targetKey + "=" + String(value) + "\n";
-  }
-
-  File outputFile = FFat.open(filePath, "w");
-  if (!outputFile) {
-    debugPrint("Unable to open preference file for writing: ");
-    debugPrintln(filePath);
-    return false;
-  }
-
-  size_t written = outputFile.print(updatedContent);
-  outputFile.close();
-
-  return written == updatedContent.length();
-}
-
-/*
-Delete a key/value pair from a preference file stored in FFat.
-The file format is a simple text file with one "key=value" pair per line.
-Returns true when the key is removed, false if the key or file does not exist
-or if rewriting the file fails.
-*/
-bool deletePreference(const char* filePath, const char* key) {
-  File inputFile = FFat.open(filePath, "r");
-  if (!inputFile) {
-    debugPrint("Unable to open preference file for deletion: ");
-    debugPrintln(filePath);
-    return false;
-  }
-
-  String targetKey = String(key);
-  String updatedContent;
-  bool keyDeleted = false;
-
-  while (inputFile.available()) {
-    String line = inputFile.readStringUntil('\n');
-    line.trim();
-
-    if (line.length() == 0) {
-      continue;
-    }
-
-    if (line.startsWith("#")) {
-      updatedContent += line + "\n";
-      continue;
-    }
-
-    int separatorIndex = line.indexOf('=');
-    if (separatorIndex < 0) {
-      updatedContent += line + "\n";
-      continue;
-    }
-
-    String currentKey = line.substring(0, separatorIndex);
-    currentKey.trim();
-
-    if (currentKey == targetKey) {
-      keyDeleted = true;
-      continue;
-    }
-
-    updatedContent += line + "\n";
-  }
-
-  inputFile.close();
-
-  if (!keyDeleted) {
-    return false;
-  }
-
-  File outputFile = FFat.open(filePath, "w");
-  if (!outputFile) {
-    debugPrint("Unable to rewrite preference file after deletion: ");
-    debugPrintln(filePath);
-    return false;
-  }
-
-  size_t written = outputFile.print(updatedContent);
-  outputFile.close();
-
-  return written == updatedContent.length();
-}
-
-/*
 Print the ESP32 partition table to Serial for debugging.
 Lists each partition's label, type, subtype, flash address and size.
 Only outputs when debug is enabled.
@@ -329,33 +125,6 @@ void debugPartitions() {
 */
 
 /*
-Dump the raw contents of a preference file to Serial through the debug macros.
-Returns true when the file could be opened and printed, false otherwise.
-*/
-bool debugPreference(const char* filePath) {
-  File file = FFat.open(filePath, "r");
-  if (!file) {
-    debugPrint("Unable to open preference file for debug: ");
-    debugPrintln(filePath);
-    return false;
-  }
-
-  debugPrint("Preference file dump: ");
-  debugPrintln(filePath);
-  debugPrintln("------------------------");
-
-  while (file.available()) {
-    String line = file.readStringUntil('\n');
-    line.trim();
-    debugPrintln(line);
-  }
-
-  debugPrintln("------------------------");
-  file.close();
-  return true;
-}
-
-/*
 Initialize the debug environment.
 This function enables Serial output only if a USB connection is detected.
 This avoids blocking or unnecessary logging when running on battery.
@@ -376,66 +145,6 @@ void initDebug() {
     debugEnabled = false;  // Disable debug output
   }
 }
-
-/*
-Display a simple message on the OLED screen.
-Supports one mandatory line and one optional line.
-*/
-void showMessage(const char* line1, const char* line2 = "") {
-  display.clearDisplay();                  // Clear display buffer
-  display.setTextSize(1);                  // Set text size to small (default)
-  display.setTextColor(SH110X_WHITE);      // Set text color to white (monochrome display)
-
-  display.setCursor(0, 10);                // Position cursor for first line
-  display.println(line1);                  // Print first line
-
-  // Print second line only if it is not empty
-  if (line2[0] != '\0') {
-    display.setCursor(0, 30);              // Position cursor for second line
-    display.println(line2);                // Print second line
-  }
-
-  display.display();                       // Push buffer to physical display
-}
-
-/*
-Display four lines of text with structured layout:
-- Header line (small text)
-- Two main data lines (large text)
-- Footer line (small text)
-*/
-void display4Lines(const char* line1,
-                   const char* line2,
-                   const char* line3,
-                   const char* line4) {
-  display.clearDisplay();                  // Clear previous content
-  display.setTextColor(SH110X_WHITE);      // Set drawing color
-  display.setTextSize(1);                  // Small text for header
-
-  // Line 1: Header
-  display.setCursor(0, 0);                 // Top-left corner
-  display.println(line1);                  // Print header text
-  display.drawLine(0, 10, 127, 10, SH110X_WHITE); // Draw separator line
-
-  // Line 2: First main value (large text)
-  display.setTextSize(2);                  // Increase text size
-  display.setCursor(0, 16);                // Position for line 2
-  display.println(line2);
-
-  // Line 3: Second main value (large text)
-  display.setTextSize(2);
-  display.setCursor(0, 32);
-  display.println(line3);
-
-  // Line 4: Footer
-  display.drawLine(0, 52, 127, 52, SH110X_WHITE); // Separator line
-  display.setTextSize(1);                  // Back to small text
-  display.setCursor(0, 56);                // Bottom area
-  display.println(line4);
-
-  display.display();                       // Update display
-}
-
 
 /*
 Retrieve current local time as a formatted string.
@@ -466,6 +175,7 @@ Initializes debug, I2C, sensor, display, Wi-Fi and time synchronization.
 */
 void setup() {
   initDebug();                             // Initialize debug system
+  setPreferenceDebugStream(debugEnabled ? &Serial : nullptr);
   
   if (!FFat.begin(true)) {                 // Mount and format FFat if needed
     debugPrintln("FFat initialization failed");
@@ -480,7 +190,7 @@ void setup() {
   debugPrintln("Initiating DHT20...");
   if (!aht.begin()) {                      // Try to initialize sensor
     debugPrintln("DHT20 not detected, check wiring.");
-    showMessage("DHT20 not detected", "Check wiring!"); // Display error message on screen
+    showMessage(display, "DHT20 not detected", "Check wiring!"); // Display error message on screen
     while (1) {                            // Infinite loop if sensor not found
       delay(10);
     }
@@ -490,7 +200,7 @@ void setup() {
   /* Initialize OLED display */
   if (!display.begin(OLED_ADDRESS, true)) { // Initialize display with I2C address
     debugPrintln("SH1106 not found");
-    showMessage("SH1106 not found", "Check wiring!"); // Display error message on screen
+    showMessage(display, "SH1106 not found", "Check wiring!"); // Display error message on screen
     while (true) {                         // Stop execution if display not found
       delay(100);
     }
@@ -500,10 +210,10 @@ void setup() {
   display.setRotation(2);                  // Rotate display (180° orientation)
   display.display();                      // Apply changes
 
-  showMessage("System ready");             // Display startup message
+  showMessage(display, "System ready");    // Display startup message
   delay(1000);
 
-  showMessage("Connecting to Wi-Fi...");   // Inform user about Wi-Fi connection
+  showMessage(display, "Connecting to Wi-Fi..."); // Inform user about Wi-Fi connection
   
   debugPrintln("Connecting to Wi-Fi...");
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);    // Start Wi-Fi connection
@@ -541,8 +251,6 @@ Main loop function (runs continuously).
 Reads sensor data, updates display, and prints debug information.
 */
 void loop() {
-  static bool preferenceTestDone = false;
-
   sensors_event_t humidity, temp;          // Structures to store sensor data
   aht.getEvent(&humidity, &temp);          // Read temperature and humidity
 
@@ -564,6 +272,7 @@ void loop() {
 
   // Display all information on screen
   display4Lines(
+    display,
     currentTime.c_str(),                     // Header
     line1,                                // Temperature
     line2,                                // Humidity
